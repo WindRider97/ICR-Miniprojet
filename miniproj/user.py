@@ -1,5 +1,6 @@
 import os
 import uuid
+import nacl.pwhash
 import nacl.utils
 import nacl.secret
 import crypto
@@ -10,24 +11,32 @@ from nacl.signing import SigningKey
 import pickle
 
 class User():
-    def __init__(self, name):
+    def __init__(self, name, passw):
+        """The user is assigned a uid and empty key and mappinp dictionaries.
+         The pwd hash, salt and challenge hash are generated as well as the sharing and signing keys.
+            The pwd hash is used as the master key for the user.
+           """
+        self.uid = nacl.utils.random(16)
+        self.passw = passw
         self.name = name
+        self.pwd_hash, self.pwd_salt = crypto.hash_password(passw)
+        self.challenge_hash, _ = crypto.hash_password(self.pwd_hash, self.uid)
         self.folder_keys = {}
         self.shared_keys = {}
         self.folder_mapping = {}
         self.shared_mapping = {}
         self.shared_folders_root = []
-        self.master_key = nacl.utils.random(nacl.secret.SecretBox.KEY_SIZE)
+        self.master_key = self.pwd_hash
         os.makedirs(os.path.join('./files', self.name), exist_ok=True)
         uid = str(uuid.uuid4())
-        self.folder_mapping[self.name] = uid
-        self.folder_keys[uid] = self.master_key    
+        self.folder_mapping[self.name] = uid 
         self.private_key = PrivateKey.generate()
         self.public_key = self.private_key.public_key
         self.signing_key = SigningKey.generate()
         self.verify_key = self.signing_key.verify_key
 
     def add_folder(self, folder_path):
+        """Makes sure the whole path is created and assigns a unique id and key to each folders created."""
         folder_names = folder_path.split('/')
         current_path = './'
         for folder_name in folder_names:
@@ -40,12 +49,18 @@ class User():
                     self.folder_keys[uid] = nacl.utils.random(nacl.secret.SecretBox.KEY_SIZE)
     
     def add_file(self, file_path, content):
+        """First calls the make folder to be sure the path is properly mapped and keyed"""
         file_dirname = os.path.dirname(file_path)
         self.add_folder(file_dirname)
         with open(file_path, 'wb') as file:
             file.write(content)
 
     def encrypt_root(self):
+        """Encrypts the root folder and all its content using a breadth first search algorithm.
+        Each folder is encrypted with its key (the root folder is encrypted with the master key)
+        Each file is encrypted with the key of its parent folder
+        The file mapping is updated to reflect the new encrypted names associated with the uid of the folder"""
+        
         destination = './files/server'    
         source = os.path.join('./files', self.name)
         enc_root = crypto.symmetric_enc(self.name.encode(), self.master_key)
@@ -61,6 +76,7 @@ class User():
                 source_item = os.path.join(source, item)
                 destination_item = os.path.join(destination, item)
                 if os.path.isdir(source_item):
+                    # We do not want to encrypt the shared folder
                     if item == "shared":
                         continue
                     encrypted_name = crypto.symmetric_enc(item.encode(), self.folder_keys[self.folder_mapping[item]])
@@ -72,13 +88,10 @@ class User():
                     destination_item = os.path.join(destination, encrypted_name.hex())
                     with open(source_item, 'rb') as file:
                         content = file.read()
-                    encrypted_content = crypto.symmetric_enc(content + "enc".encode(), self.folder_keys[self.folder_mapping[os.path.split(os.path.basename(source))[-1]]])
+                    encrypted_content = crypto.symmetric_enc(content + " enc then dec".encode(), self.folder_keys[self.folder_mapping[os.path.split(os.path.basename(source))[-1]]])
                     with open(destination_item, 'wb') as file:
                         file.write(encrypted_content)
     
-        source = os.path.join('./files', self.name)
-        # shutil.rmtree(source)
-
     def decrypt_root(self):
         destination = './files'
         source = os.path.join('./files/server', self.folder_mapping[self.folder_mapping[self.name]])
@@ -106,9 +119,6 @@ class User():
                     with open(destination_item, 'wb') as file:
                         file.write(decrypted_content)
 
-        source = os.path.join('./files/server', self.folder_mapping[self.folder_mapping[self.name]])
-        #  shutil.rmtree(source)
-    
     def get_key_from_value(self, dict, value):
         for key, val in dict.items():
             if val == value:
@@ -116,6 +126,9 @@ class User():
         return None
     
     def share_folder(self, folder_path, other_user_pub_key):
+        """Lists the necessary keys and mapping to share a folder with another user.
+        Encrypts the keys and mapping with the other user's public key.
+        Signs the data to ensure the integrity of the data."""
         folder_name = folder_path.split('/')[-1]
         shared_keys = {}
         shared_keys[self.folder_mapping[folder_name]] = self.folder_keys[self.folder_mapping[folder_name]]
@@ -134,6 +147,9 @@ class User():
         return shared_keys, shared_mapping, self.folder_mapping[folder_name], signed_data, verif_key
     
     def receive_folder(self, keys, shared_mapping, other_user_pub_key, folder_uid, signed_data, verif_key):
+        """First checks the integrity of the data by verifying the signature.
+        Decrypts the keys and mapping with the other user's public key
+        Adds the keys and mapping to the user's data."""
         crypto.verify(signed_data, verif_key)
         keys = crypto.decrypt_keys_asym(keys, self.private_key, other_user_pub_key)
         for key, value in keys.items():
@@ -143,12 +159,10 @@ class User():
             self.shared_mapping[key] = value
         self.shared_folders_root.append(folder_uid)
 
-
-
-
-
-    
     def fetch_shared_folder(self, folder_uid, server):
+        """Needs to be called after calling the receive_folder method.
+        Decrypts the shared folder and its content using the shared keys and mapping.
+        The shared folder is then added to the user's shared"""
         destination = os.path.join('./files', self.name, 'shared')
         enc_folder_name = server[folder_uid]
         dec_root = crypto.symmetric_dec(bytes.fromhex(enc_folder_name), self.shared_keys[self.get_key_from_value(self.shared_mapping, enc_folder_name.encode())])
@@ -197,14 +211,25 @@ class User():
         self.folder_mapping = folder_mapping
         self.shared_mapping = shared_mapping    
         self.decrypt_root()
+
+    def prepare_login(self, salt_from_server):
+        pwd_hash, _ = crypto.hash_password(self.passw, salt_from_server)
+        challenge_hash, _ = crypto.hash_password(pwd_hash, self.uid)
+        return challenge_hash
+    
+    def change_password(self, new_password):
+        self.passw = new_password
+        self.pwd_hash, self.pwd_salt = crypto.hash_password(new_password)
+        self.challenge_hash, _ = crypto.hash_password(self.pwd_hash, self.uid)
+        self.master_key = self.pwd_hash
     
 
 if __name__ == '__main__':
-    alice = User('Alice')
+    alice = User('Alice', 'Password123')
     alice.add_file('./files/Alice/Documents/Files/hello.txt', b'Hello World!')
     alice.add_file('./files/Alice/Documents/Secret/secret.txt', b'Hello World?')
 
-    bob = User('Bob')
+    bob = User('Bob', 'Password456')
     bob.add_file('./files/Bob/SharedFolder/Files/hello.txt', b'Hello World!')
     bob.add_file('./files/Bob/SharedFolder2/Secret/secret.txt', b'Hello World?')
     bob.encrypt_root()
