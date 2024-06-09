@@ -6,6 +6,8 @@ import crypto
 import shutil
 from nacl.public import PrivateKey, Box
 from my_tools import display_tree
+from nacl.signing import SigningKey
+import pickle
 
 class User():
     def __init__(self, name):
@@ -22,6 +24,8 @@ class User():
         self.folder_keys[uid] = self.master_key    
         self.private_key = PrivateKey.generate()
         self.public_key = self.private_key.public_key
+        self.signing_key = SigningKey.generate()
+        self.verify_key = self.signing_key.verify_key
 
     def add_folder(self, folder_path):
         folder_names = folder_path.split('/')
@@ -125,9 +129,12 @@ class User():
                 shared_mapping[self.folder_mapping[dirname]] = self.folder_mapping[self.folder_mapping[dirname]]    
         shared_keys = crypto.encrypt_keys_asym(shared_keys, self.private_key, other_user_pub_key)
         shared_mapping = crypto.encrypt_keys_asym(shared_mapping, self.private_key, other_user_pub_key)
-        return shared_keys, shared_mapping, self.folder_mapping[folder_name]
+        data_to_sign = (shared_keys, shared_mapping, self.folder_mapping[folder_name])
+        signed_data, verif_key = crypto.sign(data_to_sign, self.signing_key, self.verify_key)
+        return shared_keys, shared_mapping, self.folder_mapping[folder_name], signed_data, verif_key
     
-    def receive_folder(self, keys, shared_mapping, other_user_pub_key, folder_uid):
+    def receive_folder(self, keys, shared_mapping, other_user_pub_key, folder_uid, signed_data, verif_key):
+        crypto.verify(signed_data, verif_key)
         keys = crypto.decrypt_keys_asym(keys, self.private_key, other_user_pub_key)
         for key, value in keys.items():
             self.shared_keys[key] = value
@@ -135,6 +142,10 @@ class User():
         for key, value in shared_mapping.items():
             self.shared_mapping[key] = value
         self.shared_folders_root.append(folder_uid)
+
+
+
+
 
     
     def fetch_shared_folder(self, folder_uid, server):
@@ -197,10 +208,10 @@ if __name__ == '__main__':
     bob.add_file('./files/Bob/SharedFolder/Files/hello.txt', b'Hello World!')
     bob.add_file('./files/Bob/SharedFolder2/Secret/secret.txt', b'Hello World?')
     bob.encrypt_root()
-    shared_keys, shared_mapping, folder_uid = bob.share_folder('./files/Bob/SharedFolder', alice.public_key)
-    shared_keys2, shared_mapping2, folder_uid2 = bob.share_folder('./files/Bob/SharedFolder2', alice.public_key)
-    alice.receive_folder(shared_keys, shared_mapping, bob.public_key, folder_uid)
-    alice.receive_folder(shared_keys2, shared_mapping2, bob.public_key, folder_uid2)
+    shared_keys, shared_mapping, folder_uid, signature, verif_key = bob.share_folder('./files/Bob/SharedFolder', alice.public_key)
+    shared_keys2, shared_mapping2, folder_uid2, signature2, verif_key2 = bob.share_folder('./files/Bob/SharedFolder2', alice.public_key)
+    alice.receive_folder(shared_keys, shared_mapping, bob.public_key, folder_uid, signature, verif_key)
+    alice.receive_folder(shared_keys2, shared_mapping2, bob.public_key, folder_uid2, signature2, verif_key2)
     alice.fetch_shared_folder(folder_uid, bob.folder_mapping)
     alice.fetch_shared_folder(folder_uid2, bob.folder_mapping)
     alice.encrypt_root()

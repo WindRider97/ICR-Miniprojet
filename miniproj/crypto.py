@@ -1,7 +1,8 @@
 import nacl.utils
 import nacl.secret
 from nacl.public import PrivateKey, Box
-
+from nacl.signing import SigningKey, VerifyKey
+import pickle
 
 def symmetric_enc(data, key):
     box = nacl.secret.SecretBox(key)
@@ -54,3 +55,10 @@ def decrypt_keys_asym(keys, my_priv_key, their_pub_key):
         decrypted_keys[decrypted_key.decode()] = decrypted_value
     return decrypted_keys
 
+def sign(data, signe_key, verif_key):
+    byte_data = repr(data).encode('utf-8')
+    return signe_key.sign(byte_data), verif_key.encode()
+
+def verify(signature, pub_key):
+    verif_key = VerifyKey(pub_key)
+    return verif_key.verify(signature)
