@@ -13,24 +13,23 @@ import pickle
 class User():
     def __init__(self, name, passw):
         """The user is assigned a uid and empty key and mappinp dictionaries.
-         The pwd hash, salt and challenge hash are generated as well as the sharing and signing keys.
-            The pwd hash is used as the master key for the user.
-           """
+        The pwd hash, salt and challenge hash are generated as well as the sharing and signing keys.
+        The pwd hash is used as the master key for the user.
+        """
         self.uid = nacl.utils.random(16)
-        self.passw = passw
-        self.name = name
-        self.pwd_hash, self.pwd_salt = crypto.hash_password(passw)
+        self.passw = passw.encode()
+        self.name = name.encode()
+        self.pwd_hash, self.pwd_salt = crypto.hash_password(self.passw)
         self.challenge_hash, _ = crypto.hash_password(self.pwd_hash, self.uid)
-        self.folder_keys = {}
-        self.shared_keys = {}
-        self.folder_mapping = {}
-        self.enc_folder_mapping = {}
-        self.shared_mapping = {}
-        self.shared_folders_root = []
+        self.folder_keys = {} #The folder keys [uid] = key
+        self.shared_keys = {} #The shared folder keys [uid] = key
+        self.folder_mapping = {} #The folder mapping [folder_name] = uid
+        self.enc_folder_mapping = {} #The encrypted folder mapping [uid] = enc_name
+        self.shared_mapping = {} #The shared folder mapping [folder_name] = uid
+        self.shared_folders_root = [] #The shared folders root
         self.master_key = self.pwd_hash
-        os.makedirs(os.path.join('./files', self.name), exist_ok=True)
-        uid = str(uuid.uuid4())
-        self.folder_mapping[self.name] = uid 
+        os.makedirs(os.path.join('./files', self.name.decode()), exist_ok=True)
+        self.folder_mapping[self.name] = uuid.uuid4().bytes
         self.private_key = PrivateKey.generate()
         self.public_key = self.private_key.public_key
         self.signing_key = SigningKey.generate()
@@ -44,8 +43,8 @@ class User():
             if folder_name != '':
                 current_path = os.path.join(current_path, folder_name)
                 if not os.path.exists(current_path):
-                    uid = str(uuid.uuid4())
-                    self.folder_mapping[folder_name] = uid
+                    uid = uuid.uuid4().bytes
+                    self.folder_mapping[folder_name.encode()] = uid
                     os.makedirs(current_path, exist_ok=True)
                     self.folder_keys[uid] = nacl.utils.random(nacl.secret.SecretBox.KEY_SIZE)
     
@@ -62,36 +61,34 @@ class User():
         Each file is encrypted with the key of its parent folder
         The file mapping is updated to reflect the new encrypted names associated with the uid of the folder"""
         destination = './files/server'    
-        source = os.path.join('./files', self.name)
-        enc_root = crypto.symmetric_enc(self.name.encode(), self.master_key)
-        try:
-            self.enc_folder_mapping[self.folder_mapping[self.name].encode()] = enc_root
-        except:
-            self.enc_folder_mapping[self.folder_mapping[self.name]] = enc_root
+        source = os.path.join('./files', self.name.decode())
+        enc_root = crypto.symmetric_enc(self.name, self.master_key)
+        self.enc_folder_mapping[self.folder_mapping[self.name]] = enc_root
         destination = os.path.join(destination, enc_root.hex())
 
         queue = [(source, destination)]
-
         while queue:
             source, destination = queue.pop(0)
             os.makedirs(destination, exist_ok=True)
             for item in os.listdir(source):
                 source_item = os.path.join(source, item)
                 destination_item = os.path.join(destination, item)
+                item = item.encode()
                 if os.path.isdir(source_item):
                     # We do not want to encrypt the shared folder
-                    if item == "shared":
+                    if item.decode() == "shared":
                         continue
-                    encrypted_name = crypto.symmetric_enc(item.encode(), self.folder_keys[self.folder_mapping[item]])
+                    encrypted_name = crypto.symmetric_enc(item, self.folder_keys[self.folder_mapping[item]])
                     self.enc_folder_mapping[self.folder_mapping[item]] = encrypted_name
                     destination_item = os.path.join(destination, encrypted_name.hex())
                     queue.append((source_item, destination_item))
                 else:
-                    encrypted_name = crypto.symmetric_enc(item.encode(), self.folder_keys[self.folder_mapping[os.path.split(os.path.basename(source))[-1]]])
+                    parent_key = self.folder_keys[self.folder_mapping[os.path.split(os.path.basename(source))[-1].encode()]]
+                    encrypted_name = crypto.symmetric_enc(item, parent_key)
                     destination_item = os.path.join(destination, encrypted_name.hex())
                     with open(source_item, 'rb') as file:
                         content = file.read()
-                    encrypted_content = crypto.symmetric_enc(content + " enc then dec".encode(), self.folder_keys[self.folder_mapping[os.path.split(os.path.basename(source))[-1]]])
+                    encrypted_content = crypto.symmetric_enc(content + " enc then dec".encode(), parent_key) #Added a little flag to see if the encryption and decryption works
                     with open(destination_item, 'wb') as file:
                         file.write(encrypted_content)
     
@@ -111,17 +108,11 @@ class User():
                 source_item = os.path.join(source, item)
                 destination_item = os.path.join(destination, item)
                 if os.path.isdir(source_item):
-                    try:
-                        decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), self.folder_keys[self.get_key_from_value(self.enc_folder_mapping, bytes.fromhex(item))])
-                    except:
-                        decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), self.folder_keys[self.get_key_from_value(self.enc_folder_mapping, bytes.fromhex(item)).encode()])
+                    decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), self.folder_keys[self.get_key_from_value(self.enc_folder_mapping, bytes.fromhex(item))])
                     destination_item = os.path.join(destination, decrypted_name.decode())
                     queue.append((source_item, destination_item))
                 else:
-                    try:
-                        key = self.folder_keys[self.get_key_from_value(self.enc_folder_mapping, bytes.fromhex(os.path.split(os.path.basename(source))[-1])).encode()]
-                    except:
-                        key = self.folder_keys[self.get_key_from_value(self.enc_folder_mapping, bytes.fromhex(os.path.split(os.path.basename(source))[-1]))]
+                    key = self.folder_keys[self.get_key_from_value(self.enc_folder_mapping, bytes.fromhex(os.path.split(os.path.basename(source))[-1]))]
                     decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), key)
                     destination_item = os.path.join(destination, decrypted_name.decode())
                     with open(source_item, 'rb') as file:
@@ -140,20 +131,17 @@ class User():
         """Lists the necessary keys and mapping to share a folder with another user.
         Encrypts the keys and mapping with the other user's public key.
         Signs the data to ensure the integrity of the data."""
-        folder_name = folder_path.split('/')[-1]
+        folder_name = folder_path.split('/')[-1].encode()
         shared_keys = {}
         shared_keys[self.folder_mapping[folder_name]] = self.folder_keys[self.folder_mapping[folder_name]]
         shared_mapping = {}
         shared_mapping[folder_name] = self.folder_mapping[folder_name]
-        try:
-            shared_mapping[self.folder_mapping[folder_name]] = self.enc_folder_mapping[self.folder_mapping[folder_name]]
-        except:
-            shared_mapping[self.folder_mapping[folder_name]] = self.enc_folder_mapping[self.folder_mapping[folder_name].encode()]
+        shared_mapping[self.folder_mapping[folder_name]] = self.enc_folder_mapping[self.folder_mapping[folder_name]]
         for dirpath, dirnames, filenames in os.walk(folder_path):
             for dirname in dirnames:
+                dirname = dirname.encode()
                 shared_keys[self.folder_mapping[dirname]] = self.folder_keys[self.folder_mapping[dirname]]
                 shared_mapping[dirname] = self.folder_mapping[dirname]
-                print(self.enc_folder_mapping)
                 shared_mapping[self.folder_mapping[dirname]] = self.enc_folder_mapping[self.folder_mapping[dirname]]    
         shared_keys = crypto.encrypt_keys_asym(shared_keys, self.private_key, other_user_pub_key)
         shared_mapping = crypto.encrypt_keys_asym(shared_mapping, self.private_key, other_user_pub_key)
@@ -178,13 +166,11 @@ class User():
         """Needs to be called after calling the receive_folder method.
         Decrypts the shared folder and its content using the shared keys and mapping.
         The shared folder is then added to the user's shared"""
-        destination = os.path.join('./files', self.name, 'shared')
+        destination = os.path.join('./files', self.name.decode(), 'shared')
         enc_folder_name = server[folder_uid]
         dec_root = crypto.symmetric_dec(enc_folder_name, self.shared_keys[self.get_key_from_value(self.shared_mapping, enc_folder_name)])
         destination = os.path.join(destination, dec_root.decode())
-        print(enc_folder_name.hex())
         source = self.find_folder(enc_folder_name.hex())
-        print(source)
         queue = [(source, destination)]
 
         while queue:
@@ -194,9 +180,6 @@ class User():
                 source_item = os.path.join(source, item)
                 destination_item = os.path.join(destination, item)
                 if os.path.isdir(source_item):
-                    print("shared keys", self.shared_keys)
-                    print("shared mapping", self.shared_mapping)
-                    print(item.encode())
                     decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), self.shared_keys[self.get_key_from_value(self.shared_mapping, bytes.fromhex(item))])
 
                     destination_item = os.path.join(destination, decrypted_name.decode())
@@ -215,9 +198,7 @@ class User():
     def find_folder(self, folder_name):
         for root, dirs, files in os.walk('./files/server'):
             if folder_name in dirs:
-                print("found")
                 return os.path.join(root, folder_name)
-        print("not found")
         return None
     
     def upload_data(self):
@@ -232,10 +213,7 @@ class User():
         dec_folder_keys = crypto.decrypt_keys_sym(folder_keys, self.master_key)
         folder_keys = {}
         for k, v in dec_folder_keys.items():
-            try:
-                folder_keys[k.encode()] = v
-            except:
-                folder_keys[k] = v
+            folder_keys[k] = v
         self.folder_keys = folder_keys
         self.shared_keys = crypto.decrypt_keys_sym(shared_keys, self.master_key)
         self.folder_mapping = crypto.decrypt_keys_sym(folder_mapping, self.master_key)
@@ -249,8 +227,8 @@ class User():
         return challenge_hash
     
     def change_password(self, new_password):
-        self.passw = new_password
-        self.pwd_hash, self.pwd_salt = crypto.hash_password(new_password)
+        self.passw = new_password.encode()
+        self.pwd_hash, self.pwd_salt = crypto.hash_password(self.passw)
         self.challenge_hash, _ = crypto.hash_password(self.pwd_hash, self.uid)
         self.master_key = self.pwd_hash
 

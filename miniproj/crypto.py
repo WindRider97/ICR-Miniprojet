@@ -29,14 +29,8 @@ def encrypt_keys_sym(keys, key):
     """Is called when encrypting the users key folder with the master key to store them on the server"""
     encrypted_keys = {}
     for k, v in keys.items():
-        try:
-            encrypted_key = symmetric_enc(k.encode(), key)
-        except:
-            encrypted_key = symmetric_enc(k, key)
-        try:
-            encrypted_value = symmetric_enc(v, key)
-        except:
-            encrypted_value = symmetric_enc(v.encode(), key)
+        encrypted_key = symmetric_enc(k, key)
+        encrypted_value = symmetric_enc(v, key)
         encrypted_keys[encrypted_key] = encrypted_value
     return encrypted_keys
 
@@ -44,11 +38,8 @@ def encrypt_keys_asym(keys, my_priv_key, their_pub_key):
     """Is called when sharing keys with another user"""
     encrypted_keys = {}
     for k, v in keys.items():
-        encrypted_key = asymmetric_enc(k.encode(), my_priv_key, their_pub_key)
-        try:
-            encrypted_value = asymmetric_enc(v, my_priv_key, their_pub_key)
-        except:
-            encrypted_value = asymmetric_enc(v.encode(), my_priv_key, their_pub_key)
+        encrypted_key = asymmetric_enc(k, my_priv_key, their_pub_key)
+        encrypted_value = asymmetric_enc(v, my_priv_key, their_pub_key)
         encrypted_keys[encrypted_key] = encrypted_value
     return encrypted_keys
 
@@ -58,7 +49,7 @@ def decrypt_keys_sym(keys, key):
     for k, v in keys.items():
         decrypted_key = symmetric_dec(k, key)
         decrypted_value = symmetric_dec(v, key)
-        decrypted_keys[decrypted_key.decode()] = decrypted_value
+        decrypted_keys[decrypted_key] = decrypted_value
     return decrypted_keys
 
 def decrypt_keys_asym(keys, my_priv_key, their_pub_key):
@@ -67,7 +58,7 @@ def decrypt_keys_asym(keys, my_priv_key, their_pub_key):
     for k, v in keys.items():
         decrypted_key = asymmetric_dec(k, my_priv_key, their_pub_key)
         decrypted_value = asymmetric_dec(v, my_priv_key, their_pub_key)
-        decrypted_keys[decrypted_key.decode()] = decrypted_value
+        decrypted_keys[decrypted_key] = decrypted_value
     return decrypted_keys
 
 def sign(data, sign_key, verif_key):
@@ -82,8 +73,5 @@ def hash_password(password, salt = None):
     """Returns a password hahs of 32 bytes and a salt of 16 bytes. Uses Argon2id from Libsodium."""
     if(salt is None):
         salt = nacl.utils.random(16)
-    try:
-        pwd_hash = nacl.pwhash.argon2id.kdf(32, password.encode(), salt)
-    except:
-        pwd_hash = nacl.pwhash.argon2id.kdf(32, password, salt)
+    pwd_hash = nacl.pwhash.argon2id.kdf(32, password, salt)
     return pwd_hash, salt
