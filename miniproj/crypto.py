@@ -29,7 +29,10 @@ def encrypt_keys_sym(keys, key):
     """Is called when encrypting the users key folder with the master key to store them on the server"""
     encrypted_keys = {}
     for k, v in keys.items():
-        encrypted_key = symmetric_enc(k.encode(), key)
+        try:
+            encrypted_key = symmetric_enc(k.encode(), key)
+        except:
+            encrypted_key = symmetric_enc(k, key)
         try:
             encrypted_value = symmetric_enc(v, key)
         except:

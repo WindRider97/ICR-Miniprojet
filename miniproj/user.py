@@ -24,6 +24,7 @@ class User():
         self.folder_keys = {}
         self.shared_keys = {}
         self.folder_mapping = {}
+        self.enc_folder_mapping = {}
         self.shared_mapping = {}
         self.shared_folders_root = []
         self.master_key = self.pwd_hash
@@ -60,11 +61,13 @@ class User():
         Each folder is encrypted with its key (the root folder is encrypted with the master key)
         Each file is encrypted with the key of its parent folder
         The file mapping is updated to reflect the new encrypted names associated with the uid of the folder"""
-        
         destination = './files/server'    
         source = os.path.join('./files', self.name)
         enc_root = crypto.symmetric_enc(self.name.encode(), self.master_key)
-        self.folder_mapping[self.folder_mapping[self.name]] = enc_root.hex()
+        try:
+            self.enc_folder_mapping[self.folder_mapping[self.name].encode()] = enc_root
+        except:
+            self.enc_folder_mapping[self.folder_mapping[self.name]] = enc_root
         destination = os.path.join(destination, enc_root.hex())
 
         queue = [(source, destination)]
@@ -80,7 +83,7 @@ class User():
                     if item == "shared":
                         continue
                     encrypted_name = crypto.symmetric_enc(item.encode(), self.folder_keys[self.folder_mapping[item]])
-                    self.folder_mapping[self.folder_mapping[item]] = encrypted_name.hex()
+                    self.enc_folder_mapping[self.folder_mapping[item]] = encrypted_name
                     destination_item = os.path.join(destination, encrypted_name.hex())
                     queue.append((source_item, destination_item))
                 else:
@@ -94,8 +97,10 @@ class User():
     
     def decrypt_root(self):
         destination = './files'
-        source = os.path.join('./files/server', self.folder_mapping[self.folder_mapping[self.name]])
-        dec_root = crypto.symmetric_dec(bytes.fromhex(self.folder_mapping[self.folder_mapping[self.name]]), self.master_key)
+
+        source = os.path.join('./files/server', self.enc_folder_mapping[self.folder_mapping[self.name]].hex())
+
+        dec_root = crypto.symmetric_dec(self.enc_folder_mapping[self.folder_mapping[self.name]], self.master_key)
         destination = os.path.join(destination, dec_root.decode())
         queue = [(source, destination)]
 
@@ -106,11 +111,17 @@ class User():
                 source_item = os.path.join(source, item)
                 destination_item = os.path.join(destination, item)
                 if os.path.isdir(source_item):
-                    decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), self.folder_keys[self.get_key_from_value(self.folder_mapping, item)])
+                    try:
+                        decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), self.folder_keys[self.get_key_from_value(self.enc_folder_mapping, bytes.fromhex(item))])
+                    except:
+                        decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), self.folder_keys[self.get_key_from_value(self.enc_folder_mapping, bytes.fromhex(item)).encode()])
                     destination_item = os.path.join(destination, decrypted_name.decode())
                     queue.append((source_item, destination_item))
                 else:
-                    key = self.folder_keys[self.get_key_from_value(self.folder_mapping, os.path.split(os.path.basename(source))[-1])]
+                    try:
+                        key = self.folder_keys[self.get_key_from_value(self.enc_folder_mapping, bytes.fromhex(os.path.split(os.path.basename(source))[-1])).encode()]
+                    except:
+                        key = self.folder_keys[self.get_key_from_value(self.enc_folder_mapping, bytes.fromhex(os.path.split(os.path.basename(source))[-1]))]
                     decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), key)
                     destination_item = os.path.join(destination, decrypted_name.decode())
                     with open(source_item, 'rb') as file:
@@ -134,12 +145,16 @@ class User():
         shared_keys[self.folder_mapping[folder_name]] = self.folder_keys[self.folder_mapping[folder_name]]
         shared_mapping = {}
         shared_mapping[folder_name] = self.folder_mapping[folder_name]
-        shared_mapping[self.folder_mapping[folder_name]] = self.folder_mapping[self.folder_mapping[folder_name]]
+        try:
+            shared_mapping[self.folder_mapping[folder_name]] = self.enc_folder_mapping[self.folder_mapping[folder_name]]
+        except:
+            shared_mapping[self.folder_mapping[folder_name]] = self.enc_folder_mapping[self.folder_mapping[folder_name].encode()]
         for dirpath, dirnames, filenames in os.walk(folder_path):
             for dirname in dirnames:
                 shared_keys[self.folder_mapping[dirname]] = self.folder_keys[self.folder_mapping[dirname]]
                 shared_mapping[dirname] = self.folder_mapping[dirname]
-                shared_mapping[self.folder_mapping[dirname]] = self.folder_mapping[self.folder_mapping[dirname]]    
+                print(self.enc_folder_mapping)
+                shared_mapping[self.folder_mapping[dirname]] = self.enc_folder_mapping[self.folder_mapping[dirname]]    
         shared_keys = crypto.encrypt_keys_asym(shared_keys, self.private_key, other_user_pub_key)
         shared_mapping = crypto.encrypt_keys_asym(shared_mapping, self.private_key, other_user_pub_key)
         data_to_sign = (shared_keys, shared_mapping, self.folder_mapping[folder_name])
@@ -165,9 +180,11 @@ class User():
         The shared folder is then added to the user's shared"""
         destination = os.path.join('./files', self.name, 'shared')
         enc_folder_name = server[folder_uid]
-        dec_root = crypto.symmetric_dec(bytes.fromhex(enc_folder_name), self.shared_keys[self.get_key_from_value(self.shared_mapping, enc_folder_name.encode())])
+        dec_root = crypto.symmetric_dec(enc_folder_name, self.shared_keys[self.get_key_from_value(self.shared_mapping, enc_folder_name)])
         destination = os.path.join(destination, dec_root.decode())
-        source = self.find_folder(enc_folder_name)
+        print(enc_folder_name.hex())
+        source = self.find_folder(enc_folder_name.hex())
+        print(source)
         queue = [(source, destination)]
 
         while queue:
@@ -177,11 +194,15 @@ class User():
                 source_item = os.path.join(source, item)
                 destination_item = os.path.join(destination, item)
                 if os.path.isdir(source_item):
-                    decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), self.shared_keys[self.get_key_from_value(self.shared_mapping, item.encode())])
+                    print("shared keys", self.shared_keys)
+                    print("shared mapping", self.shared_mapping)
+                    print(item.encode())
+                    decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), self.shared_keys[self.get_key_from_value(self.shared_mapping, bytes.fromhex(item))])
+
                     destination_item = os.path.join(destination, decrypted_name.decode())
                     queue.append((source_item, destination_item))
                 else:
-                    key = self.shared_keys[self.get_key_from_value(self.shared_mapping, os.path.split(os.path.basename(source))[-1].encode())]
+                    key = self.shared_keys[self.get_key_from_value(self.shared_mapping, bytes.fromhex(os.path.split(os.path.basename(source))[-1]))]
                     decrypted_name = crypto.symmetric_dec(bytes.fromhex(item), key)
                     destination_item = os.path.join(destination, decrypted_name.decode())
                     with open(source_item, 'rb') as file:
@@ -194,22 +215,32 @@ class User():
     def find_folder(self, folder_name):
         for root, dirs, files in os.walk('./files/server'):
             if folder_name in dirs:
+                print("found")
                 return os.path.join(root, folder_name)
+        print("not found")
         return None
     
     def upload_data(self):
         self.encrypt_root()
         folder_keys = crypto.encrypt_keys_sym(self.folder_keys, self.master_key)
-        shared_keys = crypto.encrypt_keys_asym(self.shared_keys, self.private_key, self.public_key)
-        return folder_keys, shared_keys, self.folder_mapping, self.shared_mapping
+        shared_keys = crypto.encrypt_keys_sym(self.shared_keys, self.master_key)
+        folder_mapping = crypto.encrypt_keys_sym(self.folder_mapping, self.master_key)
+        shared_mapping = crypto.encrypt_keys_sym(self.shared_mapping, self.master_key)
+        return folder_keys, shared_keys, folder_mapping, shared_mapping, self.enc_folder_mapping
 
-    def download_data(self, folder_keys, shared_keys, folder_mapping, shared_mapping):
-        folder_keys = crypto.decrypt_keys_sym(folder_keys, self.master_key)
-        shared_keys = crypto.decrypt_keys_asym(shared_keys, self.private_key, self.public_key)
+    def download_data(self, folder_keys, shared_keys, folder_mapping, shared_mapping, enc_folder_mapping):
+        dec_folder_keys = crypto.decrypt_keys_sym(folder_keys, self.master_key)
+        folder_keys = {}
+        for k, v in dec_folder_keys.items():
+            try:
+                folder_keys[k.encode()] = v
+            except:
+                folder_keys[k] = v
         self.folder_keys = folder_keys
-        self.shared_keys = shared_keys
-        self.folder_mapping = folder_mapping
-        self.shared_mapping = shared_mapping    
+        self.shared_keys = crypto.decrypt_keys_sym(shared_keys, self.master_key)
+        self.folder_mapping = crypto.decrypt_keys_sym(folder_mapping, self.master_key)
+        self.shared_mapping = crypto.decrypt_keys_sym(shared_mapping, self.master_key)    
+        self.enc_folder_mapping = enc_folder_mapping
         self.decrypt_root()
 
     def prepare_login(self, salt_from_server):
@@ -222,6 +253,7 @@ class User():
         self.pwd_hash, self.pwd_salt = crypto.hash_password(new_password)
         self.challenge_hash, _ = crypto.hash_password(self.pwd_hash, self.uid)
         self.master_key = self.pwd_hash
+
     
 
 if __name__ == '__main__':
