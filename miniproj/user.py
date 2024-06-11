@@ -24,7 +24,7 @@ class User():
         self.folder_mapping = {}  # The folder mapping [folder_name] = uid
         # The encrypted folder mapping [uid] = enc_name
         self.enc_folder_mapping = {}
-        # The shared folder mapping [folder_name] = uid
+        # The shared folder mapping [folder_name] = uid and [uid] = enc_name
         self.shared_mapping = {}
         self.shared_folders_root = []  # The shared folders root
         self.master_key = self.pwd_hash
