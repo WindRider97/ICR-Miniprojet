@@ -11,6 +11,8 @@ def display_tree(startpath, prefix=''):
             print(prefix + '├── ' + item)
             display_tree(path, prefix + '│   ')
         else:
+            if item == '.gitkeep':
+                continue
             modified_time = os.path.getmtime(path)
             formatted_time = datetime.fromtimestamp(
                 modified_time).strftime('%Y-%m-%d %H:%M:%S.%f')

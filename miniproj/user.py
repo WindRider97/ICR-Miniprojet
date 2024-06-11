@@ -94,9 +94,8 @@ class User():
                         destination, encrypted_name.hex())
                     with open(source_item, 'rb') as file:
                         content = file.read()
-                    # Added a little flag to see if the encryption and decryption works
                     encrypted_content = crypto.symmetric_enc(
-                        content + " enc then dec".encode(), parent_key)
+                        content, parent_key)
                     with open(destination_item, 'wb') as file:
                         file.write(encrypted_content)
 
@@ -225,6 +224,11 @@ class User():
                     with open(destination_item, 'wb') as file:
                         file.write(decrypted_content)
 
+    def fetch_shared_folders(self) -> None:
+        """Fetches all the shared folders from the server. Called when dowloading the user's data from the server."""
+        for folder_uid in self.shared_folders_root:
+            self.fetch_shared_folder(folder_uid, self.shared_mapping)
+
     def find_folder(self, folder_name: str) -> str:
         for root, dirs, files in os.walk('./files/server'):
             if folder_name in dirs:
@@ -254,6 +258,7 @@ class User():
             shared_mapping, self.master_key)
         self.enc_folder_mapping = enc_folder_mapping
         self.decrypt_root()
+        self.fetch_shared_folders()
 
     def prepare_login(self, salt_from_server: bytes) -> bytes:
         pwd_hash, _ = crypto.hash_password(self.passw, salt_from_server)

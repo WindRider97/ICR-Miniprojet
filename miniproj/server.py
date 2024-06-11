@@ -87,7 +87,7 @@ if __name__ == '__main__':
     print("shared keys", server.users_shared_keys)
     print("shared_mapping", server.users_shared_mapping)
     print("enc folder map", server.users_enc_folder_mapping)
-# display_tree('./files')
+    # display_tree('./files')
     # print()
     # server.upload_data(bob)
     # display_tree('./files')
