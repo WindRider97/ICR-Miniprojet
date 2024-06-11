@@ -270,28 +270,3 @@ class User():
         self.pwd_hash, self.pwd_salt = crypto.hash_password(self.passw)
         self.challenge_hash, _ = crypto.hash_password(self.pwd_hash, self.uid)
         self.master_key = self.pwd_hash
-
-
-if __name__ == '__main__':
-    alice = User('Alice', 'Password123')
-    alice.add_file('./files/Alice/Documents/Files/hello.txt', b'Hello World!')
-    alice.add_file('./files/Alice/Documents/Secret/secret.txt',
-                   b'Hello World?')
-
-    bob = User('Bob', 'Password456')
-    bob.add_file('./files/Bob/SharedFolder/Files/hello.txt', b'Hello World!')
-    bob.add_file('./files/Bob/SharedFolder2/Secret/secret.txt',
-                 b'Hello World?')
-    bob.encrypt_root()
-    shared_keys, shared_mapping, folder_uid, signature, verif_key = bob.share_folder(
-        './files/Bob/SharedFolder', alice.public_key)
-    shared_keys2, shared_mapping2, folder_uid2, signature2, verif_key2 = bob.share_folder(
-        './files/Bob/SharedFolder2', alice.public_key)
-    alice.receive_folder(shared_keys, shared_mapping,
-                         bob.public_key, folder_uid, signature, verif_key)
-    alice.receive_folder(shared_keys2, shared_mapping2,
-                         bob.public_key, folder_uid2, signature2, verif_key2)
-    alice.fetch_shared_folder(folder_uid, bob.folder_mapping)
-    alice.fetch_shared_folder(folder_uid2, bob.folder_mapping)
-    alice.encrypt_root()
-    alice.decrypt_root()
